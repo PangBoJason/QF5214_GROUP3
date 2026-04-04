@@ -1,0 +1,30 @@
+# Environment & secrets
+.env
+
+# Claude Code local config
+.claude/
+
+# Raw BTS data (large files, download separately)
+data/raw/
+
+# Database (large binary, not tracked)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

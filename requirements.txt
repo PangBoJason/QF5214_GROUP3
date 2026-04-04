@@ -1,0 +1,25 @@
+# Core data
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.13.1
+
+# Machine learning
+scikit-learn==1.5.2
+
+# Visualisation
+matplotlib==3.9.2
+seaborn==0.13.2
+
+# Table formatting (pandas.to_markdown)
+tabulate==0.10.0
+
+# Data acquisition
+yfinance==0.2.54
+requests==2.32.3
+beautifulsoup4==4.12.3
+
+# NLP / sentiment (VADER is part of nltk)
+nltk
+
+# LLM API
+openai==2.30.0
