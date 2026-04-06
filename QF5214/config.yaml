@@ -1,0 +1,54 @@
+data:
+  db_path: "data/quant_flights.db"
+  data_dir: "data"
+  earnings_csv: "data/day.csv"
+
+models:
+  dir: "models"
+
+training:
+  year_start: 2000
+  year_end: 2016
+  top_n_carriers: 10
+  xgboost:
+    n_estimators: 400
+    max_depth: 8
+    learning_rate: 0.05
+    subsample: 0.9
+    colsample_bytree: 0.9
+    random_state: 42
+
+backtest:
+  test_year_start: 2017
+  test_year_end: 2025
+  n_mc_paths: 1000
+  mc_row_chunk: 50000
+  random_seed: 42
+
+factor:
+  zscore_within_quarter: true
+  winsorize_pct: 0.01
+
+fundamental:
+  mwu_eta: 2.0
+  event_window_days: 5
+  transaction_cost_bps: 50.0
+  yfinance:
+    start: "2017-01-01"
+    end_auto: false
+    end: "2026-02-27"
+
+
+agents:
+  model: "gpt-5"
+  temperature: 0.2
+
+logging:
+  level: "INFO"
+  file: "logs/pipeline.log"
+
+plots:
+  enabled: true
+  dir: "reports/figures"
+  dpi: 140
+  format: "png"

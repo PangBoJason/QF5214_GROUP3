@@ -1,0 +1,28 @@
+# Environment
+.env
+
+# Generated logs and reports
+logs/
+reports/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Data and models (large binaries)
+data/
+models/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

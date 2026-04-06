@@ -1,0 +1,1261 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{microtype}
+\usepackage{array}
+
+\graphicspath{{./reports/figures/}{./}}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!70!black,
+  pdftitle={QF5214 Aviation Quant Pipeline}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\footnotesize QF5214 Aviation Quant Pipeline}
+\rhead{\footnotesize Group Project Report}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{1em}{}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  frame=single,
+  breaklines=true,
+  backgroundcolor=\color{gray!5},
+  captionpos=b,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  xleftmargin=1.5em
+}
+
+\newcommand{\RPK}{\mathrm{RPK}}
+\newcommand{\ASK}{\mathrm{ASK}}
+\newcommand{\LF}{\mathrm{LF}}
+\newcommand{\IC}{\mathrm{IC}}
+\newcommand{\WMAPE}{\mathrm{WMAPE}}
+
+\begin{document}
+
+\begin{titlepage}
+\centering
+\vspace*{1.4cm}
+{\LARGE\bfseries
+QF5214 Aviation Quant Pipeline:\\[0.4em]
+Data Engineering and Data Science for\\[0.4em]
+Airline Earnings-Oriented Research\par}
+\vspace{1.2cm}
+{\large Group Project Report\par}
+\vspace{0.8cm}
+{\normalsize April 2026\par}
+\vspace{1.4cm}
+
+\begin{abstract}
+\noindent
+This report presents QF5214, an end-to-end aviation quantitative research
+pipeline that starts from raw BTS T-100 segment files and ends with
+interpretable backtest results, figures, and automated reports. The project is
+designed around two priorities. The first is data engineering: organizing large
+raw airline operating records into a reproducible SQLite-centered workflow with
+stable intermediate tables, cache-aware execution, and clear output artifacts.
+The second is data science: transforming route-level airline operations into
+model-ready features, predicting load factor and passenger traffic out of
+sample, aggregating the resulting signals into quarterly factors, and testing
+whether those factors are informative in an event-driven equity framework.
+
+The implemented pipeline consists of data cleaning, feature engineering,
+XGBoost-based load-factor modeling, out-of-sample stochastic prediction,
+quarterly factor construction, and a six-airline event-driven backtest using a
+multiplicative-weights-update combination rule. In its current checked state,
+the prediction layer achieves $\WMAPE \approx 11.34\%$ over 2,656,668
+out-of-sample observations. The final backtest covers 31 quarters and produces
+positive gross and net cumulative returns of approximately $91.47\%$ and
+$68.15\%$, respectively, with annualized Sharpe ratios of 1.287 gross and
+1.027 net.
+
+The report argues that the strongest contribution of the project lies in the
+integration of engineering and modeling rather than in any single metric. The
+system demonstrates how raw airline operational data can be structured,
+transformed, modeled, and evaluated inside one coherent workflow. This makes
+the project suitable not only as a quantitative analysis exercise but also as a
+coursework example of how data engineering and data science can be combined in
+a practical research setting.
+\end{abstract}
+
+\vfill
+\begin{tabular}{ll}
+\textbf{Primary data source:} & BTS T-100 Segment data \\
+\textbf{Core storage layer:} & SQLite database \texttt{data/quant\_flights.db} \\
+\textbf{Main model:} & XGBoost load-factor regressor \\
+\textbf{Main evaluation:} & Quarterly event-driven airline equity backtest \\
+\end{tabular}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{Introduction and Problem Statement}
+
+\subsection{Project Motivation}
+
+Airline companies are unusual in that a large part of their underlying business
+activity is visible through operational data before the market sees the final
+quarterly report in structured financial form. Passenger counts, seat supply,
+route activity, and traffic volume all evolve during the quarter, while the
+earnings release is published only after the operating period is complete. This
+creates a natural research question: can operational airline data be organized
+early enough, and modeled carefully enough, to provide useful information about
+later earnings-related market outcomes?
+
+The motivation for this project comes directly from that timing gap. Rather than
+starting from analyst estimates or purely market-based factors, the project
+starts from the operating layer. This is important because airline economics
+are strongly tied to tangible quantities such as passengers carried, distance
+flown, and available seat supply. A pipeline that can structure these data
+cleanly may therefore support both business interpretation and quantitative
+evaluation.
+
+\subsection{Problem Statement}
+
+The project addresses a linked set of engineering and modeling problems.
+
+From the \textbf{data engineering} perspective, the problem is how to ingest
+large raw BTS route-level files, normalize them into consistent tables, and
+preserve intermediate outputs in a form that can be reused across pipeline
+stages. The challenge is not only volume but also workflow structure: without a
+clear storage design, the feature, model, and backtest stages would become hard
+to reproduce or explain.
+
+From the \textbf{data science} perspective, the problem is how to translate
+route-level operational data into signals that are useful at the quarterly
+carrier level. This requires feature engineering, predictive modeling,
+aggregation, and event-based evaluation. The modeling goal is not only to fit a
+route-level forecast but also to test whether the resulting signals can support
+an interpretable equity-event research framework.
+
+\subsection{Project Objective}
+
+The objective of QF5214 is to build one complete workflow that:
+
+\begin{enumerate}[leftmargin=*, label=(\roman*)]
+  \item ingests and stores raw airline operating data efficiently;
+  \item constructs route-level features from those operating records;
+  \item trains an out-of-sample predictive model for airline load factor and
+  related passenger quantities;
+  \item converts model outputs into quarterly factors at the airline level; and
+  \item evaluates those factors in a tradable event-driven backtest around
+  earnings releases.
+\end{enumerate}
+
+This objective is deliberately broader than a single-model benchmark. The
+report treats the project as a pipeline, not as a one-off model experiment.
+That framing is essential because the strongest value of the project comes from
+the interaction between its storage design, feature logic, predictive model,
+and final evaluation layer.
+
+\subsection{Report Orientation}
+
+This report is written with a clear emphasis on the two most important
+technical layers of the project:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Data engineering}, including ingestion, storage design,
+  intermediate tables, caching, and reproducibility; and
+  \item \textbf{Data science}, including feature construction, predictive
+  modeling, factor construction, and event-driven backtest interpretation.
+\end{itemize}
+
+The project does contain a lightweight automation layer for current-run report
+generation and anomaly summarization, but that is intentionally treated as a
+supporting component rather than the center of the report.
+
+\section{Project Architecture and Design}
+
+\subsection{Why the Project Uses a Pipeline Architecture}
+
+The project is implemented as a sequence of connected stages instead of a
+single notebook or one large script. This is a deliberate architectural choice.
+Because the workflow starts from large raw files and ends with tables, figures,
+metrics, and reports, the project benefits from having clear stage boundaries.
+Each stage has a defined input and output, and those outputs are persisted
+rather than kept only in memory.
+
+This architecture improves three things at once. First, it improves
+reproducibility, because downstream stages can be rerun against known upstream
+tables. Second, it improves engineering clarity, because the role of each stage
+is explicit. Third, it improves presentation quality, because the project can
+be explained naturally as a data flow from source files to research outputs.
+
+\subsection{End-to-End Flow}
+
+The full workflow is:
+
+\begin{center}
+\fbox{
+\begin{minipage}{0.92\textwidth}
+\centering
+\texttt{Raw BTS .asc files + day.csv} \\
+$\Downarrow$ \\
+\texttt{clean\_data.py} $\rightarrow$ \texttt{t100\_segment, earnings\_day} \\
+$\Downarrow$ \\
+\texttt{feature\_engineering.py} $\rightarrow$ \texttt{engineered\_features} \\
+$\Downarrow$ \\
+\texttt{train\_model.py} $\rightarrow$ model bundle \\
+$\Downarrow$ \\
+\texttt{backtest\_model.py} $\rightarrow$ \texttt{sde\_predictions, sde\_run\_meta} \\
+$\Downarrow$ \\
+\texttt{factor\_engineering.py} $\rightarrow$ \texttt{quarterly\_factors} \\
+$\Downarrow$ \\
+\texttt{fundamental\_backtest.py} $\rightarrow$ portfolio metrics \\
+$\Downarrow$ \\
+\texttt{plotting.py + agents} $\rightarrow$ charts, run report, anomaly report
+\end{minipage}
+}
+\end{center}
+
+This flow is simple enough to be explained in a classroom setting but strong
+enough to support a non-trivial amount of data and analysis. The project is not
+trying to imitate a distributed production platform. Instead, it uses a local,
+inspectable architecture that is appropriate for a student research project.
+
+\subsection{SQLite as the Data Bus}
+
+The core design choice is the use of SQLite as a central data bus. The database
+\texttt{data/quant\_flights.db} sits in the middle of the entire project. Raw
+inputs are cleaned into it, intermediate feature tables are written to it,
+prediction outputs are persisted to it, and downstream factor and price tables
+are also stored there.
+
+This decision has several advantages:
+
+\begin{enumerate}[leftmargin=*, label=(\arabic*)]
+  \item SQLite is lightweight and local, which keeps the project portable.
+  \item Tables can be inspected directly outside the Python runtime.
+  \item Intermediate artifacts survive across runs.
+  \item Later stages can reuse existing outputs rather than recompute them.
+  \item The whole pipeline becomes easier to debug because each stage leaves a
+  trace in a persistent form.
+\end{enumerate}
+
+For a project whose cleaned data already exceeds six million rows, this is a
+practical and meaningful engineering choice. It turns the codebase into more
+than a sequence of calculations; it turns it into a reproducible system.
+
+\subsection{Stage Boundaries and Responsibility}
+
+The architecture also works because each major script has a clear role.
+\texttt{clean\_data.py} owns ingestion. \texttt{feature\_engineering.py} owns
+feature creation. \texttt{train\_model.py} owns model fitting.
+\texttt{backtest\_model.py} owns out-of-sample prediction generation and cache
+logic. \texttt{factor\_engineering.py} owns quarterly factor creation.
+\texttt{fundamental\_backtest.py} owns the final DS evaluation layer.
+\texttt{plotting.py} and the two lightweight agents turn the numeric outputs
+into human-readable deliverables.
+
+This script-level separation supports maintainability. It also makes the final
+project easier to explain because the architecture is reflected directly in the
+file structure.
+
+\subsection{Cached Execution}
+
+One of the most practical features of the architecture is that it supports
+cached execution. If a table such as \texttt{engineered\_features} already
+exists, or if the prediction signature stored in \texttt{sde\_run\_meta}
+matches the current state, the pipeline can skip repeated work. This is
+especially valuable for the prediction layer, which would otherwise be
+expensive to regenerate every time.
+
+The significance of this feature is not only performance. It also shows that
+the project has been engineered as a workflow rather than as a one-time script.
+That is an important architectural quality for a coursework submission.
+
+\subsection{Architecture as a DE Contribution}
+
+The architecture itself is one of the project’s main contributions. It is easy
+to treat data engineering as merely a preliminary step before “real modeling,”
+but in this project the engineering structure is essential to everything that
+follows. Without a clean ingestion layer, a persistent storage design, and
+cache-aware stage boundaries, the model and backtest layers would be much
+harder to trust, rerun, or communicate.
+
+\section{Data Sources and Dataset Links}
+
+\subsection{Main Data Inputs}
+
+The current project uses three main sources of information:
+
+\begin{enumerate}[leftmargin=*, label=(\arabic*)]
+  \item BTS T-100 segment data for route-level airline operations;
+  \item a local earnings calendar CSV for quarterly event timing; and
+  \item cached daily adjusted-close equity prices for the six target airlines
+  and SPY benchmark.
+\end{enumerate}
+
+These sources are chosen because they match the project objective directly. The
+first provides the operating layer, the second provides event alignment, and
+the third provides the market layer required for evaluation.
+
+\begin{table}[H]
+\centering\small
+\caption{Source datasets used by the project}
+\label{tab:source_summary}
+\begin{tabularx}{\textwidth}{l X X}
+\toprule
+\textbf{Source} & \textbf{Role in the project} & \textbf{Access / location} \\
+\midrule
+BTS T-100 Segment data & Route-level monthly operating records including seats, passengers, distance, origin, destination, and carrier & \href{https://www.transtats.bts.gov/}{https://www.transtats.bts.gov/}, stored locally as \texttt{data/*.asc} \\
+Local earnings calendar & Quarter-level event dates for the six target airlines & \texttt{data/day.csv}, imported to \texttt{earnings\_day} \\
+Adjusted-close price data & Daily equity prices used in the final event-driven backtest & cached in \texttt{equity\_adj\_close\_daily} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Why BTS T-100 is the Core Dataset}
+
+The most important dataset in the project is the BTS T-100 segment data. It is
+the reason the project is structurally different from a standard price-only
+factor exercise. Instead of beginning from market data or third-party analyst
+signals, the project starts from the operating layer of the airline business.
+This gives the pipeline a strong business logic: passenger flow, seat capacity,
+and traffic volume are directly tied to the underlying economics of airline
+performance.
+
+Using BTS T-100 also creates a genuine engineering task. The data arrives as
+large raw ASCII files rather than in a ready-made model table. That means the
+project must solve ingestion, parsing, cleaning, and persistence before
+modeling can even begin.
+
+\subsection{Dataset Coverage in the Local Project}
+
+In its current checked form, the project database contains:
+
+\begin{itemize}[leftmargin=*]
+  \item 6,724,354 cleaned segment rows in \texttt{t100\_segment};
+  \item 6,723,959 engineered rows in \texttt{engineered\_features};
+  \item 2,656,668 out-of-sample prediction rows in \texttt{sde\_predictions};
+  \item 2,550 quarterly factor rows in \texttt{quarterly\_factors};
+  \item 216 earnings-calendar rows in \texttt{earnings\_day}; and
+  \item 16,107 cached price rows in \texttt{equity\_adj\_close\_daily}.
+\end{itemize}
+
+These counts matter because they show that the project is operating on a
+substantial local dataset rather than on a toy subset. The storage and feature
+design decisions are therefore motivated by real data scale.
+
+\subsection{Target Airline Universe}
+
+The event-driven backtest focuses on six listed U.S. carriers:
+
+\begin{center}
+\texttt{AAL, DAL, UAL, LUV, ALK, JBLU}
+\end{center}
+
+This choice keeps the project focused and manageable while still representing a
+meaningful set of major U.S. airlines. The operating layer can contain many
+more carriers in the raw data, but the final market-facing evaluation is built
+around a targeted tradable universe.
+
+\subsection{Benchmark and Event Alignment}
+
+The final backtest uses SPY as benchmark in the cached price layer. This allows
+the project to express the final result in an event-driven equity framework
+rather than only as a raw operating forecast. The earnings calendar provides
+the event dates needed to map the quarterly factor layer onto a later realized
+market outcome.
+
+\subsection{Why the Data Design Supports the Report}
+
+The data-source design helps the report because it maps cleanly onto the
+narrative:
+
+\begin{itemize}[leftmargin=*]
+  \item the operating layer explains \emph{where the signal comes from};
+  \item the event calendar explains \emph{when the signal is evaluated}; and
+  \item the cached price layer explains \emph{how the final market result is
+  measured}.
+\end{itemize}
+
+This alignment between source design and report narrative is one reason the
+project reads as a coherent DE+DS system instead of a collection of unrelated
+scripts.
+
+\section{Data Engineering Implementation}
+
+\subsection{From Raw Files to Structured Tables}
+
+The engineering work begins with raw BTS T-100 files stored locally in
+\texttt{data/}. These files are large, historical, and operational in nature.
+They are not ready-made model matrices. Instead, they represent a raw source
+that must be converted into a structured research asset. This is why the first
+substantive contribution of the project is the creation of a stable ingestion
+and cleaning pipeline.
+
+\texttt{clean\_data.py} performs this transition. It reads the raw files,
+parses the core segment attributes, and writes the result into
+\texttt{t100\_segment}. It also imports the local earnings calendar into
+\texttt{earnings\_day}. The result is that the project moves immediately from
+loosely structured source files to explicit relational tables with predictable
+names and roles.
+
+\subsection{Why Table Materialization Matters}
+
+Persisting intermediate tables is one of the strongest engineering decisions in
+the project. If the pipeline only transformed raw files into in-memory data
+frames, every later stage would require repeated heavy preprocessing and would
+be harder to debug. By materializing \texttt{t100\_segment},
+\texttt{engineered\_features}, \texttt{sde\_predictions}, and
+\texttt{quarterly\_factors}, the project creates a stable intermediate state at
+each major boundary.
+
+This has practical benefits:
+
+\begin{itemize}[leftmargin=*]
+  \item repeated runs can skip expensive stages;
+  \item errors can be isolated to a smaller part of the workflow;
+  \item outputs can be inspected directly in the database;
+  \item team members can reason about the project stage by stage.
+\end{itemize}
+
+Materialization therefore serves both engineering and collaboration purposes.
+
+\subsection{Feature Engineering as a Data Engineering Problem}
+
+Feature engineering is often described purely as a modeling step, but in this
+project it is also an engineering task. The feature stage must transform more
+than six million segment rows into a model-ready table without exhausting
+memory or losing track of provenance. That means the logic must be both
+statistically useful and operationally manageable.
+
+The feature pipeline includes:
+
+\begin{itemize}[leftmargin=*]
+  \item transformed capacity variables;
+  \item route-share measures;
+  \item route concentration measures based on HHI;
+  \item lagged operating variables;
+  \item airport-encoding style features; and
+  \item explicit carrier and month structure.
+\end{itemize}
+
+These are not arbitrary additions. Each family connects a raw operational idea
+to a model-ready quantity while still preserving the semantics of the original
+airline data.
+
+\subsection{Memory and Runtime Considerations}
+
+The engineering implementation had to be adjusted so that the pipeline could
+run on a local machine with realistic resource limits. This is one reason the
+project is more than a conceptual design: it has already been shaped by real
+runtime constraints.
+
+The current implementation addresses local execution by:
+
+\begin{enumerate}[leftmargin=*, label=(\arabic*)]
+  \item using lighter dtypes in large data frames;
+  \item converting suitable columns to categorical form;
+  \item avoiding unnecessarily large concatenation patterns in feature and
+  prediction matrix construction;
+  \item chunking parts of the prediction layer where appropriate; and
+  \item relying on cached SQLite outputs instead of repeating every stage.
+\end{enumerate}
+
+These changes matter because they transform the pipeline from something that is
+theoretically well designed into something that can actually be executed.
+
+\subsection{Feature Table Scale}
+
+The final engineered feature table contains 6,723,959 rows. This is important
+because it shows that feature creation was performed at the same order of scale
+as the cleaned operational table. The project does not reduce the engineering
+problem by discarding most of the data before modeling. Instead, it carries the
+operating detail forward into a model-ready layer.
+
+\subsection{Engineering Reuse Through Caching}
+
+Caching appears in the project in two main forms. The first is table existence:
+if \texttt{engineered\_features} already exists and the user does not force a
+rebuild, the feature stage can be skipped. The second is signature-based
+caching in the prediction stage, where \texttt{sde\_run\_meta} determines
+whether the prediction layer can be safely reused.
+
+This is a meaningful DE contribution because it links computation to state. The
+pipeline is aware of what has already been produced, and therefore behaves like
+a workflow system rather than a one-shot script.
+
+\subsection{Engineering Outputs Beyond the Database}
+
+The project’s engineering layer also extends beyond the database itself. Logs
+are written to \texttt{logs/pipeline.log}, reports are written to
+\texttt{reports/}, and plots are written to \texttt{reports/figures/}. This
+means that the engineering design includes both persistent data storage and
+persistent communication artifacts.
+
+That is important for a project report because it shows that the engineering
+layer does not stop at computation. It also supports observability,
+traceability, and presentation.
+
+\subsection{Why DE is a Core Contribution}
+
+Taken together, the ingestion logic, SQLite-centered storage, materialized stage
+outputs, caching rules, runtime management, and output organization make data
+engineering one of the main contributions of the project. Without this layer,
+the later DS results would be much less convincing. The predictive model and
+backtest are valuable, but they are valuable \emph{because} they sit on top of
+a stable and inspectable engineering foundation.
+
+\section{Data Science Methodology}
+
+\subsection{Modeling Objective}
+
+The DS layer begins once the engineered feature table exists. The main modeling
+objective is to estimate airline load factor from route-level operating
+features. Load factor is an attractive target because it connects capacity and
+demand, and because it can be used as a building block for later passenger and
+traffic-related quantities.
+
+This objective is important because it keeps the model grounded in business
+structure. Rather than predicting price directly, the model first predicts an
+operational quantity that has a natural economic interpretation.
+
+\subsection{XGBoost as the Main Predictive Model}
+
+The project uses an XGBoost regressor as the main predictive engine. This is a
+reasonable choice for several reasons. The relationship between route-level
+features and load factor is likely nonlinear. Carrier effects, route structure,
+seasonality, and competition may all interact. Tree-based boosting is therefore
+a practical modeling choice because it can capture such interactions without
+requiring a manually specified high-order parametric form.
+
+The final model is saved as \texttt{flight\_revenue\_bundle.joblib}, which is
+important from a DS workflow perspective because it preserves the trained
+artifact for reuse.
+
+\subsection{Training Window and Validation Discipline}
+
+The current training setup uses historical data up to 2016 for model fitting,
+while the out-of-sample evaluation begins in 2017. This is a sensible
+time-ordered design for a forecasting-oriented problem. The implementation also
+uses a cleaner separation between training and validation during model fitting,
+which reduces the risk of optimistic early-stopping behavior.
+
+In addition, the residual or uncertainty calibration used downstream is
+constructed in a walk-forward manner. This detail matters because the project
+is not merely reporting in-sample fit quality; it is trying to produce an
+operationally meaningful out-of-sample layer.
+
+\subsection{Prediction Layer and Derived Quantities}
+
+Once the model is trained, it is applied to the out-of-sample period from 2017
+to 2025. The prediction layer generates quantities such as predicted passengers
+and predicted $\RPK$, and stores them in \texttt{sde\_predictions}. The table
+also retains the realized passenger and traffic information required for later
+diagnostics.
+
+In project terminology this stage is described as an SDE backtest layer, but in
+practical terms it functions as a stochastic operating-forecast layer that
+extends the model output beyond a pure point estimate. The purpose is to create
+a richer prediction object that can later be aggregated into quarterly
+research factors.
+
+\subsection{Prediction Metrics}
+
+The current checked project snapshot reports:
+
+\begin{itemize}[leftmargin=*]
+  \item MAE of approximately 281.30;
+  \item RMSE of approximately 640.90;
+  \item $\WMAPE$ of approximately $11.34\%$; and
+  \item 2,656,668 out-of-sample prediction observations.
+\end{itemize}
+
+These metrics indicate that the route-level forecast layer is stable enough to
+support the later factor and backtest stages. They do not need to be perfect to
+be useful. What matters here is that the prediction layer provides a coherent
+operational signal that can be transformed into carrier-level quarterly factors.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.88\textwidth]{sde_pred_vs_actual_scatter_20260405_225923.png}
+\caption{Predicted versus actual passengers in the out-of-sample prediction
+layer. The figure summarizes how closely the model-based forecast aligns with
+the realized operating outcome.}
+\label{fig:sde_scatter}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.88\textwidth]{carrier_wmape_bar_20260405_225924.png}
+\caption{Carrier-level WMAPE summary. This chart is useful because it turns the
+route-level forecast problem into a carrier-level diagnostic view.}
+\label{fig:wmape_bar}
+\end{figure}
+
+\subsection{Quarterly Factor Construction}
+
+The monthly prediction outputs are not the final research object. They are
+aggregated into quarterly carrier-level factors that summarize operating
+conditions in a form suitable for cross-sectional event analysis. The project
+currently uses four factors:
+
+\begin{center}
+\texttt{factor\_rpk, factor\_lf, factor\_ask, factor\_share}
+\end{center}
+
+These factors capture different aspects of airline operations. RPK reflects
+traffic, LF reflects utilization, ASK reflects capacity, and share-related
+measures reflect route position or competitive structure. Together they form a
+small but interpretable factor family.
+
+\subsection{Why the DS Layer is Sequential}
+
+One of the strengths of the DS implementation is that it is sequential and
+interpretable:
+
+\begin{enumerate}[leftmargin=*, label=(\arabic*)]
+  \item route-level features are built from operational records;
+  \item those features feed a predictive model;
+  \item model outputs are stored at the route and month level;
+  \item stored outputs are aggregated into quarterly carrier factors; and
+  \item the factors are evaluated in an event-driven backtest.
+\end{enumerate}
+
+This sequence gives the DS layer more depth than a standalone prediction score.
+The project does not stop when the model finishes; it carries the output
+forward until it becomes a market-facing research result.
+
+\section{Backtest Design, Results, and Interpretation}
+
+\subsection{Why the Final Evaluation is Event Driven}
+
+The final research question of the project is not whether airline operations
+can be forecast in isolation. It is whether those operational signals can be
+organized into an equity-event framework around earnings releases. This is why
+the last stage of the DS layer is event driven.
+
+The final backtest uses the quarterly factor table, the earnings calendar, and
+cached equity prices for the six target airlines and SPY benchmark. It asks
+whether carriers with stronger operating signals subsequently show stronger
+event-window outcomes.
+
+\subsection{Tradable Post-Formation Return Design}
+
+An important part of the current implementation is that the event return is
+measured in a way that matches the portfolio formation logic. The signal is
+formed after quarter end, and the measured return occurs in a post-formation
+event window. This makes the evaluation more practically aligned and easier to
+defend in a report setting.
+
+This design matters because the credibility of a backtest depends not only on
+the final metric but also on whether the timing logic is internally consistent.
+
+\subsection{MWU Expert Combination}
+
+The project combines the four quarterly factors using a multiplicative-weights
+update framework. In simple terms, each factor acts as an expert that ranks the
+cross-section, and the system adapts the expert weights through time based on
+realized outcomes. This keeps the final backtest interpretable while still
+allowing the combination rule to respond to observed performance.
+
+For a coursework project, this is a good compromise between simplicity and
+adaptivity. The combination logic is more interesting than a fixed equal-weight
+average, but it is still understandable enough to explain clearly in a report
+or presentation.
+
+\subsection{Headline Results}
+
+The current checked snapshot from \texttt{reports/\_last\_run\_metrics.json}
+reports:
+
+\begin{table}[H]
+\centering\small
+\caption{Headline checked results}
+\label{tab:headline_results}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Prediction $\WMAPE$ & 11.34\% \\
+Prediction observations & 2,656,668 \\
+Backtest quarters & 31 \\
+Gross cumulative return & 91.47\% \\
+Net cumulative return & 68.15\% \\
+Gross annualized Sharpe & 1.287 \\
+Net annualized Sharpe & 1.027 \\
+Quarterly win rate & 67.74\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+These metrics support a positive reading of the final system. The operating
+prediction layer is stable at scale, and the event-driven portfolio layer
+remains positive even after transaction-cost adjustment. That does not imply
+that every factor is individually strong in every quarter, but it does show
+that the pipeline produces a coherent DS output rather than only an isolated
+engineering artifact.
+
+\subsection{Portfolio-Level Visualization}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.88\textwidth]{quarterly_cumulative_return_gross_net_20260405_225924.png}
+\caption{Quarterly cumulative gross and net portfolio returns. The net series
+remains positive, which is important for interpreting the strategy beyond a raw
+gross-return view.}
+\label{fig:gross_net}
+\end{figure}
+
+The cumulative return chart is one of the clearest visual summaries in the
+project because it compresses the final event-driven evaluation into a single
+readable figure. It shows that the gross and net paths differ, but both remain
+positive in the checked run.
+
+\subsection{Factor Interpretation}
+
+The factor layer is summarized in the mean information coefficients. In the
+current run, the ASK and RPK related factors are stronger than the LF factor.
+This is a sensible outcome because demand scale and capacity structure often
+carry more cross-sectional business information than utilization alone.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{factor_ic_bar_20260405_225924.png}
+\caption{Average factor information coefficients from the current checked run.}
+\label{fig:factor_ic2}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{factor_corr_heatmap_20260405_225924.png}
+\caption{Factor correlation heatmap. This chart helps show where factor overlap
+exists and where the signal family may still provide differentiated views.}
+\label{fig:factor_corr2}
+\end{figure}
+
+The factor interpretation should be balanced. The project does not claim that
+each factor is independently sufficient. Instead, it shows that a small,
+operationally grounded factor family can be organized into an interpretable
+backtest framework.
+
+\subsection{Regime Interpretation}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.76\textwidth]{regime_performance_bar_20260405_225924.png}
+\caption{Regime performance summary from the checked snapshot.}
+\label{fig:regime2}
+\end{figure}
+
+The regime breakdown is useful because it shows that the project is not being
+judged only on one aggregate number. The checked results remain positive across
+pre-COVID, COVID, and post-COVID groupings, with the strongest Sharpe appearing
+in the post-COVID segment. This helps the report present the system as a
+structured research framework with interpretable behavior across broad periods.
+
+\subsection{What the Results Mean}
+
+The most reasonable interpretation of the current DS results is that the
+pipeline is directionally successful. The route-level model produces stable
+operational forecasts, those forecasts can be converted into quarterly factors,
+and the resulting factor framework produces positive event-driven portfolio
+results in the checked run.
+
+This should not be oversold as a final trading product. Rather, it should be
+presented as a coherent research outcome: a DE+DS system that demonstrates the
+practical value of organizing airline operating data into a market-evaluation
+framework.
+
+\section{Execution Instructions, Outputs, and Reproducibility}
+
+\subsection{Environment and Dependencies}
+
+The project is designed to run locally in a Python environment with the
+packages listed in \texttt{requirements.txt}. The core dependencies include
+pandas, numpy, xgboost, scipy, matplotlib, yfinance, PyYAML, joblib, and the
+OpenAI Python client used by the lightweight reporting tools.
+
+The local execution design is important because it aligns with the architecture
+described earlier. The project does not require a remote warehouse, cluster, or
+orchestration service. A user with the required files and packages can run the
+pipeline from the project directory and inspect all outputs locally.
+
+\subsection{Core Commands}
+
+The most relevant commands for reproducing the workflow are:
+
+\begin{lstlisting}[language=bash, caption={Practical command set for the project}]
+python -m pip install -r requirements.txt
+python clean_data.py
+python main.py
+
+# rebuild variants
+python main.py --force-features --force-retrain --force-sde --force-factors
+python main.py --force-retrain --force-sde --force-factors
+python main.py --force-sde --force-factors
+\end{lstlisting}
+
+These commands are intentionally simple. For a coursework report, that matters:
+the execution path is easy to document and easy to demonstrate.
+
+\subsection{Role of \texttt{config.yaml}}
+
+The configuration file is one of the project’s strongest software-engineering
+features. It groups settings into the same structure as the pipeline itself:
+data paths, model settings, backtest settings, factor settings, fundamental
+evaluation settings, plotting settings, logging, and agent controls.
+
+This design helps both reproducibility and explainability. A reader can inspect
+\texttt{config.yaml} and understand the operational assumptions of the run
+without searching through multiple Python files.
+
+\subsection{Expected Outputs}
+
+After a successful run, the user should expect the following artifacts:
+
+\begin{itemize}[leftmargin=*]
+  \item updated tables in \texttt{data/quant\_flights.db};
+  \item a model bundle in \texttt{models/};
+  \item a run report in \texttt{reports/};
+  \item a metrics snapshot in \texttt{reports/\_last\_run\_metrics.json};
+  \item an anomaly report in \texttt{logs/}; and
+  \item six PNG charts in \texttt{reports/figures/}.
+\end{itemize}
+
+This output set is one of the reasons the project reads as an integrated
+workflow. It produces persistent engineering outputs, analytical outputs, and
+presentation outputs from a single orchestrated execution.
+
+\subsection{Current-Run Automation}
+
+The current project contains two lightweight supporting tools:
+
+\begin{enumerate}[leftmargin=*, label=(\roman*)]
+  \item a run report agent that summarizes the current project outputs; and
+  \item an anomaly agent that summarizes current-run quality signals.
+\end{enumerate}
+
+These agents are intentionally limited. They do not drive the pipeline and they
+are not positioned as the main contribution of the project. Their role is to
+improve usability by translating the current state of the pipeline into a short
+human-readable layer.
+
+\subsection{Reproducibility Perspective}
+
+From a reproducibility standpoint, the project is well structured for a local
+coursework pipeline:
+
+\begin{itemize}[leftmargin=*]
+  \item source files are kept locally;
+  \item main intermediate outputs are persisted to SQLite;
+  \item model artifacts are saved by name;
+  \item run metrics are exported in machine-readable form;
+  \item figures are written to a predictable output folder;
+  \item the main execution log records stage progression.
+\end{itemize}
+
+This combination makes the project easier to rerun and easier to defend in a
+report setting, because the system state is not hidden inside a transient
+runtime.
+
+\section{Findings, Future Work, and Conclusion}
+
+\subsection{Main Findings}
+
+The main finding of the project is that airline operating data can be organized
+into a coherent DE+DS workflow that produces interpretable and positive
+end-to-end research outputs. The engineering layer succeeds in turning raw BTS
+files into reusable tables and artifacts. The modeling layer succeeds in
+turning those tables into a forecast-and-factor system that can be evaluated in
+an event-driven equity framework.
+
+At the prediction level, the checked $\WMAPE$ of approximately 11.34\% suggests
+that the operational model is stable enough to support later analysis. At the
+portfolio level, the checked gross and net cumulative returns and Sharpe ratios
+show that the signal framework remains positive even after cost adjustment.
+
+\subsection{Why the DE Story Matters}
+
+It would be easy to read the project only through the final backtest chart, but
+that would understate its strongest technical contribution. The reason the
+system works as a project is that the engineering layer is explicit, persistent,
+and inspectable. The workflow begins with raw files, passes through named
+tables, stores model and prediction outputs, and ends with charts and reports.
+
+That design gives the later DS results more credibility because they are
+produced by a stable workflow rather than by an opaque one-off script.
+
+\subsection{Why the DS Story Matters}
+
+The DS contribution is equally important. The project does not stop at route
+forecasting. It carries the signal forward into quarterly factor construction
+and event-driven market evaluation. That sequence gives the final result a much
+stronger research interpretation than a route-level model score alone.
+
+The checked figures and metrics show that the DS layer is not only technically
+implemented but also communicable. The model produces a readable scatter plot,
+carrier-level WMAPE diagnostics, factor comparison charts, regime charts, and a
+final gross-versus-net portfolio view.
+
+\subsection{Future Work}
+
+Several future directions would strengthen the project further:
+
+\begin{enumerate}[leftmargin=*, label=\textbf{F\arabic*.}]
+  \item \textbf{Broader airline universe.} Expanding the cross-section would
+  deepen the factor layer and support richer evaluation.
+
+  \item \textbf{Additional external features.} Fuel proxies, macro conditions,
+  and richer network variables could be added to the current operational set.
+
+  \item \textbf{Extended validation.} Additional event-window and transaction
+  cost sensitivity analysis would improve the robustness of interpretation.
+
+  \item \textbf{More formal test coverage.} Additional unit and integration
+  tests would strengthen maintainability and handoff quality.
+\end{enumerate}
+
+These future directions do not undermine the current system. Instead, they
+represent natural next steps for extending a pipeline that already has a solid
+engineering and analytical core.
+
+\subsection{Final Conclusion}
+
+QF5214 should be understood as a data-engineering-driven quantitative research
+project. Its core achievement is the combination of structured ingestion,
+feature construction, predictive modeling, factor generation, event-driven
+evaluation, and automated output generation inside one coherent local workflow.
+
+For a student group project, this is a meaningful outcome. The system shows
+that data engineering and data science can be integrated into a practical
+research pipeline with clear storage design, interpretable analysis, and
+presentable outputs. It is this end-to-end quality, rather than any isolated
+single model score, that defines the project’s value.
+
+\appendix
+
+\section{Appendix: Technical Reference}
+
+\subsection{Core Database Tables}
+
+\begin{longtable}{p{3.2cm} p{2.0cm} p{8.9cm}}
+\caption{Core database table reference}\label{tab:appendix_tables}\\
+\toprule
+\textbf{Table} & \textbf{Rows} & \textbf{Meaning} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Table} & \textbf{Rows} & \textbf{Meaning} \\
+\midrule
+\endhead
+\texttt{t100\_segment} & 6,724,354 & Cleaned route-level operational base table derived from raw BTS files. \\
+\texttt{earnings\_day} & 216 & Quarterly event-date reference for the six airline tickers. \\
+\texttt{engineered\_features} & 6,723,959 & Route-level modeling table containing transformed operational features. \\
+\texttt{sde\_predictions} & 2,656,668 & Out-of-sample route-level prediction and derived traffic output table. \\
+\texttt{sde\_run\_meta} & 1 & Metadata used to determine whether prediction outputs can be reused. \\
+\texttt{quarterly\_factors} & 2,550 & Airline-quarter factor table consumed by the final backtest. \\
+\texttt{equity\_adj\_close\_daily} & 16,107 & Cached adjusted-close equity prices for six airlines and SPY. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Main Script Responsibilities}
+
+\begin{longtable}{p{3.2cm} p{9.6cm}}
+\caption{Script-level responsibility map}\label{tab:script_map}\\
+\toprule
+\textbf{Script} & \textbf{Role in the workflow} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Script} & \textbf{Role in the workflow} \\
+\midrule
+\endhead
+\texttt{clean\_data.py} & Parses and cleans raw BTS operating files and imports the local earnings calendar. \\
+\texttt{feature\_engineering.py} & Builds route-level model features from the cleaned operational base table. \\
+\texttt{train\_model.py} & Trains the XGBoost load-factor model and stores the model bundle. \\
+\texttt{backtest\_model.py} & Generates the out-of-sample prediction layer and manages cache metadata. \\
+\texttt{factor\_engineering.py} & Aggregates monthly prediction outputs into quarterly airline factors. \\
+\texttt{fundamental\_backtest.py} & Runs the final event-driven MWU backtest. \\
+\texttt{plotting.py} & Exports current-run charts for interpretation and presentation. \\
+\texttt{main.py} & Orchestrates the full pipeline. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Current Checked Metrics Snapshot}
+
+\begin{longtable}{p{6.0cm} p{4.8cm}}
+\caption{Current checked metrics snapshot}\label{tab:metrics_snapshot}\\
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+\endhead
+Prediction MAE & 281.2983 \\
+Prediction RMSE & 640.9028 \\
+Prediction WMAPE & 0.1134 \\
+Prediction sample size & 2,656,668 \\
+Gross cumulative return & 0.9147 \\
+Net cumulative return & 0.6815 \\
+Gross annualized Sharpe & 1.2871 \\
+Net annualized Sharpe & 1.0273 \\
+Quarterly win rate & 0.6774 \\
+Mean IC: factor\_ask & 0.0912 \\
+Mean IC: factor\_rpk & 0.0802 \\
+Mean IC: factor\_share & 0.0740 \\
+Mean IC: factor\_lf & 0.0359 \\
+\bottomrule
+\end{longtable}
+
+\subsection{Figure Set Used in the Report}
+
+The current checked figure set used by the report consists of:
+
+\begin{enumerate}[leftmargin=*, label=(\arabic*)]
+  \item predicted versus actual passengers;
+  \item carrier-level WMAPE bar chart;
+  \item cumulative gross and net return chart;
+  \item factor IC bar chart;
+  \item factor correlation heatmap; and
+  \item regime performance chart.
+\end{enumerate}
+
+These figures span the full analytical pipeline: model fit, carrier diagnostic,
+portfolio path, factor ranking, factor interaction, and regime interpretation.
+
+\subsection{Suggested Demonstration Sequence}
+
+If the project is presented live, a concise demonstration sequence would be:
+
+\begin{enumerate}[leftmargin=*, label=(\arabic*)]
+  \item show the project folders and local data assets;
+  \item explain the SQLite-centered stage architecture;
+  \item run or describe \texttt{python main.py};
+  \item inspect the latest metrics snapshot;
+  \item open the key figures;
+  \item conclude with the DE and DS contributions.
+\end{enumerate}
+
+This sequence follows the same logic as the report itself, making the written
+document and oral presentation mutually reinforcing.
+
+\subsection{Representative Feature Logic}
+
+The engineered feature layer is central enough to deserve a more explicit
+technical summary. Although the report does not list every derived column, the
+main logic can be grouped into the following representative transformations:
+
+\begin{enumerate}[leftmargin=*, label=(\arabic*)]
+  \item \textbf{volume transformation:} route-level seat and passenger values
+  are transformed so that scale can be represented smoothly rather than only
+  through raw counts;
+  \item \textbf{market structure:} route share and HHI-like quantities are
+  created to describe whether a route is highly concentrated or relatively more
+  competitive;
+  \item \textbf{seasonal memory:} lagged values are introduced so that the
+  model can compare current route activity with earlier route behavior,
+  especially the same period in a prior annual cycle;
+  \item \textbf{location encoding:} origin and destination airports are mapped
+  into compact representations that preserve airport effects without exploding
+  the dimensionality of the feature space;
+  \item \textbf{carrier and calendar structure:} carrier identity and month
+  information provide an explicit structure for systematic differences across
+  airlines and within-year traffic patterns.
+\end{enumerate}
+
+These feature groups are not meant to impress through quantity. They matter
+because they encode airline economics in a way that remains interpretable. The
+feature layer therefore supports the project’s DS goal while remaining faithful
+to its DE foundation.
+
+\subsection{Why the Feature Layer is Not Arbitrary}
+
+A common weakness in student modeling projects is that features are added
+without a clear story. This project avoids that problem by keeping feature
+families tied to recognizable business concepts. Capacity variables correspond
+to supply, passenger and RPK-related variables correspond to realized demand,
+share and HHI correspond to competition, and lag features correspond to
+historical continuity and seasonality.
+
+This matters because the report can therefore explain the feature space in
+domain language rather than only in code language. That improves both the
+analytical quality of the project and the persuasiveness of the final written
+report.
+
+\subsection{Expanded Backtest Reading Notes}
+
+The final backtest should be read with a few practical interpretations in mind.
+First, the portfolio output is the end result of the full DE+DS chain rather
+than the output of one isolated formula. Second, the gross and net return paths
+should be interpreted together. Gross performance shows the directional signal,
+while net performance shows whether that signal survives a simple implementation
+friction assumption. Third, the factor IC charts should be interpreted as a
+compact way to compare factor usefulness, not as a claim that every factor is
+independently sufficient.
+
+These distinctions are helpful because they encourage a more serious reading of
+the project. The report is not claiming a magic factor. It is showing that a
+structured operating-data pipeline can support a layered research process from
+raw data to market evaluation.
+
+\subsection{Interpreting the Current Performance Mix}
+
+The checked metrics suggest a project whose pieces are aligned. The route-level
+prediction layer is strong enough to generate meaningful downstream inputs. The
+quarterly factor layer is interpretable and non-trivial. The final backtest is
+positive both gross and net. The charts reinforce that the results can be
+understood visually rather than only through one table of numbers.
+
+This mixture is important. In many small projects, either the engineering is
+strong but the analytics remain shallow, or the analytics are ambitious but the
+engineering remains fragile. The current QF5214 version is notable because it
+connects the two layers in a visible way.
+
+\subsection{Operational Value of the Logs and Reports}
+
+The project’s logs and reports also deserve explicit mention as engineering
+artifacts. The pipeline log records which stages were skipped, which were run,
+how long they took, and whether cache logic was used. The markdown run report
+records the current checked metrics in narrative form. The anomaly report
+records current-run issues in a concise diagnostic format.
+
+These outputs are not the core analytical result, but they improve the quality
+of the workflow. They turn a technical pipeline into a project that can be
+reviewed by other people more easily. In a team setting, this matters because
+it reduces the amount of hidden context required to understand the latest run.
+
+\subsection{Why Lightweight Agents Still Make Sense}
+
+The report intentionally does not place the agent layer at the center of the
+project. Even so, it is still worth explaining why these tools are useful. The
+two current agents are practical because they work on top of the pipeline
+rather than trying to replace it. The report agent summarizes the latest
+outputs. The anomaly agent points out obvious current-run concerns. Neither
+agent changes the computational core or claims to discover the signal by
+itself.
+
+This restrained use of automation fits the overall philosophy of the project.
+The engineering and modeling layers do the heavy lifting; the automation layer
+improves readability and presentation.
+
+\subsection{Extended Reproducibility Notes}
+
+Reproducibility in this project is not defined only by whether the same Python
+script can be run twice. It is also defined by whether each major stage leaves
+behind a persistent and inspectable result. The local SQLite database preserves
+the operational base table, the feature table, the prediction outputs, the
+factor table, and the cached prices. The model bundle preserves the trained
+predictive artifact. The figures preserve the visual analytical layer. The log
+and markdown outputs preserve the narrative and runtime interpretation layer.
+
+This multi-layer reproducibility is one of the project’s strongest qualities.
+It is also why the report is justified in emphasizing data engineering so
+heavily: the reproducibility of the whole system depends more on the structure
+of the workflow than on any one formula.
+
+\subsection{Suggested Division of Work in a Team Context}
+
+The project structure also maps naturally onto team roles, which is useful for
+explaining it as a group assignment. One team member could focus on raw data
+handling and SQLite storage. Another could focus on feature engineering and the
+predictive model. Another could focus on the quarterly factor layer and
+backtest. Another could focus on presentation outputs such as charts and final
+documentation. Although these responsibilities overlap in practice, the
+architecture supports this division because the workflow already has clear stage
+boundaries.
+
+This is another sign that the project is well organized. A system with good
+stage separation is easier both to build and to present as collaborative work.
+
+\subsection{How the Report Itself Mirrors the Pipeline}
+
+The report is structured to mirror the pipeline’s logic. It begins with the
+problem, moves into architecture and source design, then explains data
+engineering, then modeling, then evaluation, then execution and outputs, and
+finally closes with findings and future work. This ordering is intentional. A
+pipeline project is best explained as a chain of transformations rather than as
+an unordered list of tools.
+
+That is why the report gives so much attention to stage transitions. The value
+of the system lies not only in the existence of each stage, but in how those
+stages connect.
+
+\subsection{Expanded Summary of Project Value}
+
+The overall value of QF5214 can be summarized through four statements:
+
+\begin{enumerate}[leftmargin=*, label=(\alph*)]
+  \item it demonstrates that raw airline operating data can be organized into a
+  durable research database;
+  \item it demonstrates that engineered airline features can support
+  out-of-sample operational forecasting at scale;
+  \item it demonstrates that those forecasts can be turned into quarterly
+  factors and evaluated in an earnings-event setting; and
+  \item it demonstrates that the full process can be presented through logs,
+  charts, and reports rather than only through raw code.
+\end{enumerate}
+
+For a student group project, this is a strong combined outcome. It reflects not
+only coding effort, but also workflow design, analytical framing, and technical
+communication.
+
+\subsection{Closing Appendix Note}
+
+This appendix has documented the project at a level detailed enough for a
+reviewer to understand its technical composition even without executing the
+code immediately. That is an appropriate finishing point for the report. The
+main body explains the story of the project, while the appendix records the
+technical reference details that support that story.
+
+\subsection{Final Technical Takeaway}
+
+Seen as a whole, the project can be read as a three-layer system. The first
+layer is data engineering: ingesting, structuring, storing, and reusing
+airline operating data. The second layer is data science: modeling load factor,
+building quarterly factors, and evaluating an event-driven portfolio. The third
+layer is communication: logs, charts, reports, and lightweight anomaly
+summaries. The reason the project works is that these three layers are aligned
+rather than disconnected.
+
+This alignment is the report’s main message. The project is not simply a set of
+Python files, and it is not simply a machine-learning exercise. It is a local,
+reproducible research workflow that shows how engineering structure can support
+analytical quality. For a coursework submission, that is a meaningful and
+defensible outcome.
+
+\subsection{Final Presentation Summary}
+
+If the project must be summarized in a final two-minute statement, the summary
+would be:
+
+\begin{quote}
+QF5214 builds a complete airline quant research workflow from raw BTS operating
+data to event-driven equity results. Its main contribution is the combination
+of a SQLite-centered data engineering pipeline with an interpretable data
+science layer for forecasting, factor construction, and backtesting. The final
+system produces persistent data artifacts, readable metrics, and presentation
+quality charts, making it a strong example of an end-to-end DE+DS coursework
+project.
+\end{quote}
+
+\end{document}
