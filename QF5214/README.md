@@ -122,9 +122,18 @@ The six figures are:
 | Gross annualized Sharpe | 1.29 |
 | Net annualized Sharpe | 1.03 |
 
+## AI agents (optional)
+
+The report and anomaly agents call the OpenAI API. To enable them, create a `.env` file in the `QF5214/` directory:
+
+```
+OPENAI_API_KEY=your_key_here
+```
+
+The pipeline runs normally without this file — agent steps are silently skipped if no key is present.
+
 ## Notes
 
 - This is a research project, not a production trading system.
 - Equity price data is fetched via `yfinance` on first run and cached in the database.
-- The AI agent layer is optional and non-blocking — the pipeline runs normally without an OpenAI API key.
 - `data/`, `models/`, `logs/`, and `reports/` are excluded from version control.
